@@ -101,9 +101,9 @@ x ≡ 2 (mod 7)
 
 **Verification:**
 
-- `23 mod 3 = 2` ✓
-- `23 mod 5 = 3` ✓
-- `23 mod 7 = 2` ✓
+- `23 mod 3 = 2`
+- `23 mod 5 = 3`
+- `23 mod 7 = 2`
 
 ## License
 
