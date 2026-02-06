@@ -1,0 +1,174 @@
+# Chinese Remainder Theorem (CRT)
+
+## Overview
+
+The **Chinese Remainder Theorem (CRT)** is a fundamental result in number theory that provides a method for solving systems of linear congruences. It states that if you have a system of congruences with pairwise coprime moduli, there exists a unique solution modulo the product of all moduli.
+
+The theorem is named after ancient Chinese mathematical texts and has applications in cryptography, computer science, and number theory.
+
+## Mathematical Explanation
+
+### Problem Statement
+
+Given a system of congruences:
+
+```
+x ≡ a₁ (mod m₁)
+x ≡ a₂ (mod m₂)
+...
+x ≡ aₙ (mod mₙ)
+```
+
+Where:
+
+- `a₁, a₂, ..., aₙ` are the remainders
+- `m₁, m₂, ..., mₙ` are the moduli
+- `gcd(mᵢ, mⱼ) = 1` for all `i ≠ j` (pairwise coprime)
+
+### Solution Formula
+
+The unique solution modulo `M = m₁ × m₂ × ... × mₙ` is:
+
+```
+x ≡ Σ(aᵢ × Mᵢ × yᵢ) (mod M)
+```
+
+Where:
+
+- `M = m₁ × m₂ × ... × mₙ` (product of all moduli)
+- `Mᵢ = M / mᵢ` (product of all moduli except mᵢ)
+- `yᵢ` is the modular multiplicative inverse of `Mᵢ` modulo `mᵢ`
+  - `Mᵢ × yᵢ ≡ 1 (mod mᵢ)`
+
+### Step-by-Step Algorithm
+
+1. **Calculate M**: Multiply all moduli together
+
+   ```
+   M = m₁ × m₂ × ... × mₙ
+   ```
+
+2. **Calculate Mᵢ for each i**: Divide M by each modulus
+
+   ```
+   Mᵢ = M / mᵢ
+   ```
+
+3. **Find modular inverses**: For each i, find `yᵢ` such that
+
+   ```
+   Mᵢ × yᵢ ≡ 1 (mod mᵢ)
+   ```
+
+   Use the Extended Euclidean Algorithm for this step.
+
+4. **Compute the solution**:
+   ```
+   x = Σ(aᵢ × Mᵢ × yᵢ) mod M
+   ```
+
+## Example
+
+Solve the system:
+
+```
+x ≡ 2 (mod 3)
+x ≡ 3 (mod 5)
+x ≡ 2 (mod 7)
+```
+
+**Solution:**
+
+1. `M = 3 × 5 × 7 = 105`
+
+2. Calculate Mᵢ values:
+   - `M₁ = 105 / 3 = 35`
+   - `M₂ = 105 / 5 = 21`
+   - `M₃ = 105 / 7 = 15`
+
+3. Find modular inverses:
+   - `35 × y₁ ≡ 1 (mod 3)` → `2 × y₁ ≡ 1 (mod 3)` → `y₁ = 2`
+   - `21 × y₂ ≡ 1 (mod 5)` → `1 × y₂ ≡ 1 (mod 5)` → `y₂ = 1`
+   - `15 × y₃ ≡ 1 (mod 7)` → `1 × y₃ ≡ 1 (mod 7)` → `y₃ = 1`
+
+4. Calculate solution:
+   ```
+   x = (2 × 35 × 2 + 3 × 21 × 1 + 2 × 15 × 1) mod 105
+   x = (140 + 63 + 30) mod 105
+   x = 233 mod 105
+   x = 23
+   ```
+
+**Verification:**
+
+- `23 mod 3 = 2` ✓
+- `23 mod 5 = 3` ✓
+- `23 mod 7 = 2` ✓
+
+## Implementation in Code
+
+### Rust Implementation
+
+```rust
+// Extended Euclidean Algorithm to find modular inverse
+fn extended_gcd(a: i64, b: i64) -> (i64, i64, i64) {
+    if b == 0 {
+        return (a, 1, 0);
+    }
+    let (gcd, x1, y1) = extended_gcd(b, a % b);
+    let x = y1;
+    let y = x1 - (a / b) * y1;
+    (gcd, x, y)
+}
+
+// Find modular multiplicative inverse
+fn mod_inverse(a: i64, m: i64) -> i64 {
+    let (gcd, x, _) = extended_gcd(a, m);
+    if gcd != 1 {
+        panic!("Modular inverse does not exist");
+    }
+    (x % m + m) % m
+}
+
+// Chinese Remainder Theorem solver
+fn chinese_remainder_theorem(remainders: &[i64], moduli: &[i64]) -> i64 {
+    let n = remainders.len();
+
+    // Calculate M (product of all moduli)
+    let m: i64 = moduli.iter().product();
+
+    let mut result = 0;
+
+    for i in 0..n {
+        // Calculate Mᵢ = M / mᵢ
+        let mi = m / moduli[i];
+
+        // Find modular inverse yᵢ
+        let yi = mod_inverse(mi, moduli[i]);
+
+        // Add to result
+        result += remainders[i] * mi * yi;
+    }
+
+    // Return result modulo M
+    result % m
+}
+
+// Example usage
+fn main() {
+    let remainders = vec![2, 3, 2];
+    let moduli = vec![3, 5, 7];
+
+    let solution = chinese_remainder_theorem(&remainders, &moduli);
+    println!("Solution: x = {}", solution);
+
+    // Verify the solution
+    for i in 0..remainders.len() {
+        println!("x mod {} = {}", moduli[i], solution % moduli[i]);
+    }
+}
+```
+
+## License
+
+This implementation is provided as educational material.

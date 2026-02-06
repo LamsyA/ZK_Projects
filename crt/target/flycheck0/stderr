@@ -1,0 +1,21 @@
+warning: failed to auto-clean cache data
+
+failed to clean entries from the global cache
+
+Caused by:
+  failed to remove file `/Users/mac/.cargo/registry/index/github.com-1ecc6299db9ec823/.cache/he/rm/hermit-abi`
+
+Caused by:
+  Permission denied (os error 13)
+   1.831979708s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint: stale: changed "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/src/main.rs"
+   1.832122083s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint:           (vs) "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/target/debug/.fingerprint/crt-addc9886959c59bb/dep-bin-crt"
+   1.832125958s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1770365069, nanos: 413927941 } < FileTime { seconds: 1770365108, nanos: 221581828 }
+   1.833420958s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint: fingerprint dirty for crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT)/Check { test: false }/TargetInner { name: "crt", doc: true, ..: with_path("/Users/mac/Documents/Lamsy/ZK_Projects/CRT/src/main.rs", Edition2024) }
+   1.833660917s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/target/debug/.fingerprint/crt-addc9886959c59bb/dep-bin-crt", reference_mtime: FileTime { seconds: 1770365069, nanos: 413927941 }, stale: "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/src/main.rs", stale_mtime: FileTime { seconds: 1770365108, nanos: 221581828 } }))
+   1.835232750s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint: stale: changed "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/src/main.rs"
+   1.835239875s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint:           (vs) "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/target/debug/.fingerprint/crt-19c4756d23b3ddbc/dep-test-bin-crt"
+   1.835242083s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint:                FileTime { seconds: 1770365069, nanos: 413840482 } < FileTime { seconds: 1770365108, nanos: 221581828 }
+   1.835384083s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint: fingerprint dirty for crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT)/Check { test: true }/TargetInner { name: "crt", doc: true, ..: with_path("/Users/mac/Documents/Lamsy/ZK_Projects/CRT/src/main.rs", Edition2024) }
+   1.835393542s  INFO prepare_target{force=false package_id=crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT) target="crt"}: cargo::core::compiler::fingerprint:     dirty: FsStatusOutdated(StaleItem(ChangedFile { reference: "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/target/debug/.fingerprint/crt-19c4756d23b3ddbc/dep-test-bin-crt", reference_mtime: FileTime { seconds: 1770365069, nanos: 413840482 }, stale: "/Users/mac/Documents/Lamsy/ZK_Projects/CRT/src/main.rs", stale_mtime: FileTime { seconds: 1770365108, nanos: 221581828 } }))
+    Checking crt v0.1.0 (/Users/mac/Documents/Lamsy/ZK_Projects/CRT)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.95s
