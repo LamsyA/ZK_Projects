@@ -1,1 +1,3 @@
-crt/target/**
+crt/target
+fermat_little_theorem/target
+fermat_little_theorem/cargo.lock

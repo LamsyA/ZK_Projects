@@ -74,3 +74,22 @@ fn printing_solution(remainders2: &[i128], moduli2: &[i128]) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mod_inverse() {
+        assert_eq!(mod_inverse(3, 11).unwrap(), 4);
+        assert_eq!(mod_inverse(5, 11).unwrap(), 9);
+    }
+
+    #[test]
+    fn test_chinese_remainder_theorem() {
+        let remainders = vec![13, 17, 14];
+        let moduli = vec![7, 76, 91];
+        // there is no solution for this case
+        assert!(chinese_remainder_theorem(&remainders, &moduli).is_err());
+    }
+}
