@@ -1,3 +1,7 @@
 crt/target
 fermat_little_theorem/target
 fermat_little_theorem/cargo.lock
+rsa_algorithm/target
+# library/target
+**/target
+**/cargo.lock
