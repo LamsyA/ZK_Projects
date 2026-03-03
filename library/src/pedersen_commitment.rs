@@ -1,7 +1,6 @@
 use ark_ec::CurveGroup;
 use ark_ff::{PrimeField, UniformRand};
 use ark_std::rand::Rng;
-use std::marker::PhantomData;
 
 /// Pedersen Commitment Scheme
 ///
@@ -20,9 +19,9 @@ use std::marker::PhantomData;
 /// - G and H are generator points on the elliptic curve
 pub struct PedersenCommitment<C: CurveGroup> {
     /// First generator point
-    pub g: C,
+    g: C,
     /// Second generator point (should be independent of g)
-    pub h: C,
+    h: C,
 }
 
 /// Represents a commitment value
@@ -41,6 +40,16 @@ pub struct Opening<F: PrimeField> {
 }
 
 impl<C: CurveGroup> PedersenCommitment<C> {
+    /// Get the first generator point
+    pub fn g(&self) -> &C {
+        &self.g
+    }
+
+    /// Get the second generator point
+    pub fn h(&self) -> &C {
+        &self.h
+    }
+
     /// Create a new Pedersen commitment scheme with random generators
     pub fn new<R: Rng>(rng: &mut R) -> Self {
         let g = C::rand(rng);
@@ -50,7 +59,13 @@ impl<C: CurveGroup> PedersenCommitment<C> {
     }
 
     /// Create a new Pedersen commitment scheme with specified generators
+    ///
+    /// # Panics
+    /// Panics if g and h are equal, which would violate the independence requirement.
+    /// Note: This check is insufficient for production use. Generators should be
+    /// independently generated using a trusted setup or cryptographic hash function.
     pub fn with_generators(g: C, h: C) -> Self {
+        assert_ne!(g, h, "Generators must be independent for security");
         Self { g, h }
     }
 
