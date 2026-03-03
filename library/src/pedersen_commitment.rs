@@ -34,9 +34,9 @@ pub struct Commitment<C: CurveGroup> {
 #[derive(Clone, Debug)]
 pub struct Opening<F: PrimeField> {
     /// The committed message
-    pub message: F,
+    message: F,
     /// The random blinding factor
-    pub randomness: F,
+    randomness: F,
 }
 
 impl<C: CurveGroup> PedersenCommitment<C> {
