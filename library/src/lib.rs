@@ -3,6 +3,7 @@ mod diffle_hellman;
 pub mod merkle_tree;
 pub mod pedersen_commitment;
 mod rsa;
+pub mod univariate;
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
