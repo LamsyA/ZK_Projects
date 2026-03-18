@@ -1,456 +1,768 @@
-use ark_ff::PrimeField;
-use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial, Polynomial};
-use ark_std::vec::Vec;
+use ark_ff::Field;
+use std::fmt;
+use std::ops::{Add, Mul, Sub};
 
-/// Univariate Polynomial Implementation using Arkworks
+/// A univariate polynomial represented in sparse form using a Vec.
+/// Stores only non-zero coefficients as (degree, coefficient) tuples.
+/// Tuples are kept sorted by degree for efficient operations.
 ///
-/// A univariate polynomial is a polynomial in a single variable, typically represented as:
-/// P(x) = a_0 + a_1*x + a_2*x^2 + ... + a_n*x^n
-///
-/// This module provides operations for creating, evaluating, and manipulating univariate polynomials
-/// over finite fields using the arkworks library.
-
-/// Represents a univariate polynomial with coefficients in a prime field
-#[derive(Clone, Debug, PartialEq)]
-pub struct UnivariatePoly<F: PrimeField> {
-    /// The underlying polynomial from arkworks
-    poly: DensePolynomial<F>,
+/// **IMPORTANT**: This implementation is strictly for Zero-Knowledge Proofs.
+/// - Only works with finite fields (arkworks Field trait)
+/// - No floating-point arithmetic allowed
+/// - All operations are exact field arithmetic
+/// - Optimized for prime field arithmetic used in ZK applications
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnivariatePolynomial<F: Field> {
+    /// Vector of (degree, coefficient) tuples, sorted by degree
+    /// Only non-zero coefficients are stored
+    terms: Vec<(usize, F)>,
 }
 
-impl<F: PrimeField> UnivariatePoly<F> {
-    /// Create a new univariate polynomial from a vector of coefficients
-    ///
-    /// The coefficients are ordered from lowest degree to highest degree.
-    /// For example, [a_0, a_1, a_2] represents a_0 + a_1*x + a_2*x^2
+impl<F: Field> UnivariatePolynomial<F> {
+    /// Creates a new empty polynomial (zero polynomial).
+    pub fn new() -> Self {
+        UnivariatePolynomial { terms: Vec::new() }
+    }
+
+    /// Creates a polynomial from a vector of (degree, coefficient) tuples.
+    /// Automatically removes zero coefficients and sorts by degree.
     ///
     /// # Arguments
-    /// * `coefficients` - Vector of field elements representing polynomial coefficients
+    /// * `terms` - Vector of (degree, coefficient) tuples
     ///
-    /// # Example
-    /// ```ignore
-    /// let coeffs = vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64)];
-    /// let poly = UnivariatePoly::new(coeffs); // 1 + 2x + 3x^2
-    /// ```
-    pub fn new(coefficients: Vec<F>) -> Self {
-        Self {
-            poly: DensePolynomial::from_coefficients_vec(coefficients),
-        }
-    }
-
-    /// Create a zero polynomial
-    pub fn zero() -> Self {
-        Self {
-            poly: DensePolynomial::from_coefficients_vec(vec![F::ZERO]),
-        }
-    }
-
-    /// Create a constant polynomial
-    ///
-    /// # Arguments
-    /// * `constant` - The constant value
-    pub fn constant(constant: F) -> Self {
-        Self {
-            poly: DensePolynomial::from_coefficients_vec(vec![constant]),
-        }
-    }
-
-    /// Get the degree of the polynomial
-    ///
-    /// Returns the highest power of x with a non-zero coefficient.
-    /// The zero polynomial has degree 0.
-    pub fn degree(&self) -> usize {
-        self.poly.degree()
-    }
-
-    /// Get the coefficients of the polynomial
-    ///
-    /// Returns a reference to the coefficient vector (lowest degree first)
-    pub fn coefficients(&self) -> &[F] {
-        self.poly.coeffs()
-    }
-
-    /// Evaluate the polynomial at a given point
-    ///
-    /// Computes P(x) using Horner's method for efficiency
-    ///
-    /// # Arguments
-    /// * `x` - The point at which to evaluate the polynomial
-    ///
-    /// # Example
-    /// ```ignore
-    /// let coeffs = vec![Fr::from(1u64), Fr::from(2u64)]; // 1 + 2x
-    /// let poly = UnivariatePoly::new(coeffs);
-    /// let result = poly.evaluate(&Fr::from(3u64)); // 1 + 2*3 = 7
-    /// ```
-    pub fn evaluate(&self, x: &F) -> F {
-        self.poly.evaluate(x)
-    }
-
-    /// Add two polynomials
-    ///
-    /// Returns a new polynomial that is the sum of self and other
-    pub fn add(&self, other: &UnivariatePoly<F>) -> UnivariatePoly<F> {
-        let mut result_coeffs = self.poly.coeffs().to_vec();
-        let other_coeffs = other.poly.coeffs();
-
-        // Extend result if other is longer
-        if other_coeffs.len() > result_coeffs.len() {
-            result_coeffs.resize(other_coeffs.len(), F::ZERO);
-        }
-
-        // Add coefficients
-        for (i, &coeff) in other_coeffs.iter().enumerate() {
-            result_coeffs[i] += coeff;
-        }
-
-        UnivariatePoly::new(result_coeffs)
-    }
-
-    /// Subtract two polynomials
-    ///
-    /// Returns a new polynomial that is self minus other
-    pub fn subtract(&self, other: &UnivariatePoly<F>) -> UnivariatePoly<F> {
-        let mut result_coeffs = self.poly.coeffs().to_vec();
-        let other_coeffs = other.poly.coeffs();
-
-        // Extend result if other is longer
-        if other_coeffs.len() > result_coeffs.len() {
-            result_coeffs.resize(other_coeffs.len(), F::ZERO);
-        }
-
-        // Subtract coefficients
-        for (i, &coeff) in other_coeffs.iter().enumerate() {
-            result_coeffs[i] -= coeff;
-        }
-
-        UnivariatePoly::new(result_coeffs)
-    }
-
-    /// Multiply two polynomials
-    ///
-    /// Returns a new polynomial that is the product of self and other
-    pub fn multiply(&self, other: &UnivariatePoly<F>) -> UnivariatePoly<F> {
-        let self_coeffs = self.poly.coeffs();
-        let other_coeffs = other.poly.coeffs();
-
-        if self_coeffs.is_empty() || other_coeffs.is_empty() {
-            return UnivariatePoly::zero();
-        }
-
-        // Result polynomial has degree = deg(self) + deg(other)
-        let result_len = self_coeffs.len() + other_coeffs.len() - 1;
-        let mut result_coeffs = vec![F::ZERO; result_len];
-
-        // Multiply each coefficient of self with each coefficient of other
-        for (i, &self_coeff) in self_coeffs.iter().enumerate() {
-            for (j, &other_coeff) in other_coeffs.iter().enumerate() {
-                result_coeffs[i + j] += self_coeff * other_coeff;
+    /// # Returns
+    /// A UnivariatePolynomial with deduplicated and sorted terms
+    pub fn from_terms(mut terms: Vec<(usize, F)>) -> Self {
+        // Remove zero coefficients
+        terms.retain(|(_, coeff)| !coeff.is_zero());
+        // Sort by degree
+        terms.sort_by_key(|(degree, _)| *degree);
+        // Remove duplicates by summing coefficients with same degree
+        let mut deduplicated: Vec<(usize, F)> = Vec::new();
+        for (degree, coeff) in terms {
+            if let Some((last_degree, last_coeff)) = deduplicated.last_mut() {
+                if *last_degree == degree {
+                    *last_coeff += coeff;
+                    if last_coeff.is_zero() {
+                        deduplicated.pop();
+                    }
+                    continue;
+                }
             }
+            deduplicated.push((degree, coeff));
         }
-
-        UnivariatePoly::new(result_coeffs)
-    }
-
-    /// Multiply the polynomial by a scalar
-    ///
-    /// Returns a new polynomial with all coefficients multiplied by the scalar
-    pub fn scalar_multiply(&self, scalar: F) -> UnivariatePoly<F> {
-        let coeffs = self
-            .poly
-            .coeffs()
-            .iter()
-            .map(|&c| c * scalar)
-            .collect();
-        UnivariatePoly::new(coeffs)
-    }
-
-    /// Compute the derivative of the polynomial
-    ///
-    /// If P(x) = a_0 + a_1*x + a_2*x^2 + ... + a_n*x^n
-    /// Then P'(x) = a_1 + 2*a_2*x + 3*a_3*x^2 + ... + n*a_n*x^(n-1)
-    pub fn derivative(&self) -> UnivariatePoly<F> {
-        let coeffs = self.poly.coeffs();
-
-        if coeffs.len() <= 1 {
-            return UnivariatePoly::zero();
+        UnivariatePolynomial {
+            terms: deduplicated,
         }
-
-        let mut derivative_coeffs = Vec::with_capacity(coeffs.len() - 1);
-
-        for i in 1..coeffs.len() {
-            derivative_coeffs.push(coeffs[i] * F::from(i as u64));
-        }
-
-        UnivariatePoly::new(derivative_coeffs)
     }
 
-    /// Evaluate the polynomial at multiple points
+    /// Sets the coefficient for a given degree.
+    /// If the coefficient is zero, it removes the entry.
     ///
-    /// Returns a vector of evaluations at the given points
-    pub fn evaluate_at_points(&self, points: &[F]) -> Vec<F> {
-        points.iter().map(|p| self.evaluate(p)).collect()
+    /// # Arguments
+    /// * `degree` - The degree of the term
+    /// * `coeff` - The coefficient (must be a field element)
+    pub fn set_coefficient(&mut self, degree: usize, coeff: F) {
+        // Find if degree already exists
+        if let Some(pos) = self.terms.iter().position(|(d, _)| *d == degree) {
+            if coeff.is_zero() {
+                self.terms.remove(pos);
+            } else {
+                self.terms[pos].1 = coeff;
+            }
+        } else if !coeff.is_zero() {
+            // Insert in sorted order
+            let pos = self
+                .terms
+                .binary_search_by_key(&degree, |(d, _)| *d)
+                .unwrap_or_else(|e| e);
+            self.terms.insert(pos, (degree, coeff));
+        }
     }
 
-    /// Check if the polynomial is zero
+    /// Gets the coefficient for a given degree.
+    /// Returns zero if the degree is not present.
+    ///
+    /// # Arguments
+    /// * `degree` - The degree to query
+    ///
+    /// # Returns
+    /// The coefficient at that degree, or F::zero() if not present
+    pub fn get_coefficient(&self, degree: usize) -> F {
+        self.terms
+            .binary_search_by_key(&degree, |(d, _)| *d)
+            .ok()
+            .map(|idx| self.terms[idx].1)
+            .unwrap_or_else(F::zero)
+    }
+
+    /// Returns the degree of the polynomial.
+    /// Returns 0 for the zero polynomial.
+    pub fn degree(&self) -> usize {
+        self.terms.last().map(|(degree, _)| *degree).unwrap_or(0)
+    }
+
+    /// Returns the number of non-zero terms in the polynomial.
+    pub fn num_terms(&self) -> usize {
+        self.terms.len()
+    }
+
+    /// Returns an iterator over the terms (degree, coefficient) in ascending order.
+    pub fn iter(&self) -> impl Iterator<Item = (usize, &F)> {
+        self.terms.iter().map(|(d, c)| (*d, c))
+    }
+
+    /// Returns a mutable iterator over the terms.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (usize, &mut F)> {
+        self.terms.iter_mut().map(|(d, c)| (*d, c))
+    }
+
+    /// Checks if the polynomial is the zero polynomial.
     pub fn is_zero(&self) -> bool {
-        self.poly.coeffs().iter().all(|&c| c == F::ZERO)
+        self.terms.is_empty()
     }
 
-    /// Get the leading coefficient (coefficient of highest degree term)
-    pub fn leading_coefficient(&self) -> Option<F> {
-        let coeffs = self.poly.coeffs();
-        if coeffs.is_empty() {
-            None
-        } else {
-            Some(coeffs[coeffs.len() - 1])
-        }
+    /// Returns a reference to the internal Vec of terms.
+    pub fn terms(&self) -> &Vec<(usize, F)> {
+        &self.terms
     }
 
-    /// Compose two polynomials: compute P(Q(x))
+    /// Evaluates the polynomial at a given point using Horner's method.
+    /// This is the most efficient method for field arithmetic.
     ///
-    /// This computes the composition of self with other polynomial
-    pub fn compose(&self, other: &UnivariatePoly<F>) -> UnivariatePoly<F> {
-        let coeffs = self.poly.coeffs();
-
-        if coeffs.is_empty() {
-            return UnivariatePoly::zero();
+    /// Horner's method: P(x) = (...((a_n * x + a_{n-1}) * x + a_{n-2}) * x + ... + a_1) * x + a_0
+    ///
+    /// # Arguments
+    /// * `x` - The point at which to evaluate (a field element)
+    ///
+    /// # Returns
+    /// The value of the polynomial at x (a field element)
+    pub fn evaluate_horner(&self, x: F) -> F {
+        if self.is_zero() {
+            return F::zero();
         }
 
-        // Start with the constant term
-        let mut result = UnivariatePoly::constant(coeffs[0]);
+        let degree = self.degree();
+        let mut result = F::zero();
 
-        // Build up the composition using Horner's method
-        let mut other_power = other.clone();
-
-        for &coeff in &coeffs[1..] {
-            let term = other_power.scalar_multiply(coeff);
-            result = result.add(&term);
-            other_power = other_power.multiply(other);
+        for d in (0..=degree).rev() {
+            result = result * x + self.get_coefficient(d);
         }
 
         result
     }
 
-    /// Shift the polynomial: compute P(x + shift)
+    /// Evaluates the polynomial at a given point using direct substitution.
+    /// Less efficient than Horner's method but useful for verification.
     ///
-    /// This returns a new polynomial where all x values are shifted by the given amount
-    pub fn shift(&self, shift: F) -> UnivariatePoly<F> {
-        let shift_poly = UnivariatePoly::new(vec![shift, F::ONE]); // x + shift
-        self.compose(&shift_poly)
+    /// Direct: P(x) = a_0 + a_1*x + a_2*x^2 + ... + a_n*x^n
+    ///
+    /// # Arguments
+    /// * `x` - The point at which to evaluate (a field element)
+    ///
+    /// # Returns
+    /// The value of the polynomial at x (a field element)
+    pub fn evaluate_direct(&self, x: F) -> F {
+        let mut result = F::zero();
+
+        for (degree, coeff) in self.iter() {
+            let mut x_power = F::one();
+            for _ in 0..degree {
+                x_power *= x;
+            }
+            result += *coeff * x_power;
+        }
+
+        result
     }
+
+    /// Returns the number of field multiplications needed for Horner evaluation.
+    /// Useful for complexity analysis in ZK circuits.
+    pub fn horner_complexity(&self) -> usize {
+        self.degree()
+    }
+
+    /// Returns the number of field multiplications needed for direct evaluation.
+    pub fn direct_complexity(&self) -> usize {
+        self.terms.iter().map(|(d, _)| d).sum()
+    }
+}
+
+impl<F: Field> Default for UnivariatePolynomial<F> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<F: Field + fmt::Display> fmt::Display for UnivariatePolynomial<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_zero() {
+            return write!(f, "0");
+        }
+
+        let mut first = true;
+        // Iterate in reverse by collecting and reversing
+        for (degree, coeff) in self.terms.iter().rev() {
+            if !first {
+                write!(f, " + ")?;
+            }
+            first = false;
+
+            if *degree == 0 {
+                write!(f, "{}", coeff)?;
+            } else if *degree == 1 {
+                write!(f, "{}x", coeff)?;
+            } else {
+                write!(f, "{}x^{}", coeff, degree)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Arithmetic Operations for Field Elements (ZK-safe)
+// ============================================================================
+
+impl<F: Field> Add for UnivariatePolynomial<F> {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        let mut result = Vec::new();
+        let mut i = 0;
+        let mut j = 0;
+
+        while i < self.terms.len() && j < other.terms.len() {
+            let (deg1, coeff1) = self.terms[i];
+            let (deg2, coeff2) = other.terms[j];
+
+            if deg1 < deg2 {
+                result.push((deg1, coeff1));
+                i += 1;
+            } else if deg1 > deg2 {
+                result.push((deg2, coeff2));
+                j += 1;
+            } else {
+                // Same degree, add coefficients
+                let sum = coeff1 + coeff2;
+                if !sum.is_zero() {
+                    result.push((deg1, sum));
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+
+        // Add remaining terms
+        while i < self.terms.len() {
+            result.push(self.terms[i]);
+            i += 1;
+        }
+        while j < other.terms.len() {
+            result.push(other.terms[j]);
+            j += 1;
+        }
+
+        UnivariatePolynomial { terms: result }
+    }
+}
+
+impl<F: Field> Sub for UnivariatePolynomial<F> {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        let mut result = Vec::new();
+        let mut i = 0;
+        let mut j = 0;
+
+        while i < self.terms.len() && j < other.terms.len() {
+            let (deg1, coeff1) = self.terms[i];
+            let (deg2, coeff2) = other.terms[j];
+
+            if deg1 < deg2 {
+                result.push((deg1, coeff1));
+                i += 1;
+            } else if deg1 > deg2 {
+                result.push((deg2, -coeff2));
+                j += 1;
+            } else {
+                // Same degree, subtract coefficients
+                let diff = coeff1 - coeff2;
+                if !diff.is_zero() {
+                    result.push((deg1, diff));
+                }
+                i += 1;
+                j += 1;
+            }
+        }
+
+        // Add remaining terms
+        while i < self.terms.len() {
+            result.push(self.terms[i]);
+            i += 1;
+        }
+        while j < other.terms.len() {
+            result.push((other.terms[j].0, -other.terms[j].1));
+            j += 1;
+        }
+
+        UnivariatePolynomial { terms: result }
+    }
+}
+
+impl<F: Field> Mul for UnivariatePolynomial<F> {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self {
+        if self.is_zero() || other.is_zero() {
+            return UnivariatePolynomial::new();
+        }
+
+        let mut result_map: Vec<(usize, F)> = Vec::new();
+
+        for (deg1, coeff1) in self.iter() {
+            for (deg2, coeff2) in other.iter() {
+                let new_degree = deg1 + deg2;
+                let new_coeff = *coeff1 * coeff2;
+
+                // Find or insert the degree
+                if let Some(pos) = result_map.iter().position(|(d, _)| *d == new_degree) {
+                    result_map[pos].1 += new_coeff;
+                    if result_map[pos].1.is_zero() {
+                        result_map.remove(pos);
+                    }
+                } else {
+                    result_map.push((new_degree, new_coeff));
+                }
+            }
+        }
+
+        // Sort by degree
+        result_map.sort_by_key(|(degree, _)| *degree);
+
+        UnivariatePolynomial { terms: result_map }
+    }
+}
+
+// ============================================================================
+// Lagrange Interpolation for Finite Fields (ZK-safe)
+// ============================================================================
+
+/// Performs Lagrange interpolation on a set of points over a finite field.
+/// Returns a polynomial that passes through all given points.
+///
+/// **IMPORTANT FOR ZK**: This uses only finite field arithmetic.
+/// - All operations are exact (no floating-point approximation)
+/// - Uses field inversion for denominator
+/// - Suitable for Shamir's Secret Sharing and polynomial commitments
+///
+/// # Arguments
+/// * `points` - A slice of (x, y) tuples representing the points to interpolate
+///              Both x and y must be field elements
+///
+/// # Returns
+/// A UnivariatePolynomial that passes through all the given points
+///
+/// # Panics
+/// Panics if any two x-coordinates are equal (duplicate points)
+pub fn lagrange_interpolation<F: Field>(points: &[(F, F)]) -> UnivariatePolynomial<F> {
+    if points.is_empty() {
+        return UnivariatePolynomial::new();
+    }
+
+    let n = points.len();
+    let mut result = UnivariatePolynomial::new();
+
+    for i in 0..n {
+        let (xi, yi) = points[i];
+
+        // Compute the Lagrange basis polynomial L_i(x)
+        let mut basis = UnivariatePolynomial::new();
+        basis.set_coefficient(0, F::one()); // Start with 1
+
+        for j in 0..n {
+            if i != j {
+                let (xj, _) = points[j];
+                let denominator = xi - xj;
+
+                // Field inversion - this is exact arithmetic in finite fields
+                let denominator_inv = denominator
+                    .inverse()
+                    .expect("Denominator must be non-zero (duplicate x-coordinates not allowed)");
+
+                // Multiply basis by (x - xj) / (xi - xj)
+                let mut factor = UnivariatePolynomial::new();
+                factor.set_coefficient(1, denominator_inv); // Coefficient of x
+                factor.set_coefficient(0, -xj * denominator_inv); // Constant term
+
+                basis = basis * factor;
+            }
+        }
+
+        // Multiply by yi and add to result
+        for (degree, coeff) in basis.iter() {
+            let current = result.get_coefficient(degree);
+            result.set_coefficient(degree, current + yi * coeff);
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ark_bn254::Fr;
-
-    type TestField = Fr;
+    use ark_std::Zero;
 
     #[test]
-    fn test_create_polynomial() {
-        let coeffs = vec![
-            TestField::from(1u64),
-            TestField::from(2u64),
-            TestField::from(3u64),
-        ];
-        let poly = UnivariatePoly::new(coeffs);
+    fn test_polynomial_creation() {
+        let poly = UnivariatePolynomial::<Fr>::new();
+        assert!(poly.is_zero());
+        assert_eq!(poly.degree(), 0);
+        assert_eq!(poly.num_terms(), 0);
+    }
 
+    #[test]
+    fn test_set_and_get_coefficient() {
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(2, Fr::from(3u32));
+        poly.set_coefficient(1, Fr::from(2u32));
+        poly.set_coefficient(0, Fr::from(1u32));
+
+        assert_eq!(poly.get_coefficient(2), Fr::from(3u32));
+        assert_eq!(poly.get_coefficient(1), Fr::from(2u32));
+        assert_eq!(poly.get_coefficient(0), Fr::from(1u32));
         assert_eq!(poly.degree(), 2);
-        assert_eq!(poly.coefficients().len(), 3);
+        assert_eq!(poly.num_terms(), 3);
     }
 
     #[test]
-    fn test_zero_polynomial() {
-        let zero = UnivariatePoly::<TestField>::zero();
-        assert!(zero.is_zero());
-    }
-
-    #[test]
-    fn test_constant_polynomial() {
-        let constant = UnivariatePoly::constant(TestField::from(5u64));
-        assert_eq!(constant.degree(), 0);
-        assert_eq!(
-            constant.evaluate(&TestField::from(100u64)),
-            TestField::from(5u64)
-        );
-    }
-
-    #[test]
-    fn test_evaluate_polynomial() {
-        // P(x) = 1 + 2x + 3x^2
-        let coeffs = vec![
-            TestField::from(1u64),
-            TestField::from(2u64),
-            TestField::from(3u64),
+    fn test_from_terms() {
+        let terms = vec![
+            (2, Fr::from(3u32)),
+            (0, Fr::from(1u32)),
+            (1, Fr::from(2u32)),
         ];
-        let poly = UnivariatePoly::new(coeffs);
+        let poly = UnivariatePolynomial::from_terms(terms);
 
-        // P(0) = 1
-        assert_eq!(poly.evaluate(&TestField::from(0u64)), TestField::from(1u64));
-
-        // P(1) = 1 + 2 + 3 = 6
-        assert_eq!(poly.evaluate(&TestField::from(1u64)), TestField::from(6u64));
-
-        // P(2) = 1 + 4 + 12 = 17
-        assert_eq!(poly.evaluate(&TestField::from(2u64)), TestField::from(17u64));
+        // Should be sorted by degree
+        assert_eq!(poly.degree(), 2);
+        assert_eq!(poly.num_terms(), 3);
+        assert_eq!(poly.get_coefficient(0), Fr::from(1u32));
+        assert_eq!(poly.get_coefficient(1), Fr::from(2u32));
+        assert_eq!(poly.get_coefficient(2), Fr::from(3u32));
     }
 
     #[test]
-    fn test_add_polynomials() {
-        // P(x) = 1 + 2x
-        let p_coeffs = vec![TestField::from(1u64), TestField::from(2u64)];
-        let p = UnivariatePoly::new(p_coeffs);
-
-        // Q(x) = 3 + 4x
-        let q_coeffs = vec![TestField::from(3u64), TestField::from(4u64)];
-        let q = UnivariatePoly::new(q_coeffs);
-
-        // P(x) + Q(x) = 4 + 6x
-        let sum = p.add(&q);
-        assert_eq!(sum.evaluate(&TestField::from(0u64)), TestField::from(4u64));
-        assert_eq!(sum.evaluate(&TestField::from(1u64)), TestField::from(10u64));
-    }
-
-    #[test]
-    fn test_subtract_polynomials() {
-        // P(x) = 5 + 3x
-        let p_coeffs = vec![TestField::from(5u64), TestField::from(3u64)];
-        let p = UnivariatePoly::new(p_coeffs);
-
-        // Q(x) = 2 + 1x
-        let q_coeffs = vec![TestField::from(2u64), TestField::from(1u64)];
-        let q = UnivariatePoly::new(q_coeffs);
-
-        // P(x) - Q(x) = 3 + 2x
-        let diff = p.subtract(&q);
-        assert_eq!(diff.evaluate(&TestField::from(0u64)), TestField::from(3u64));
-        assert_eq!(diff.evaluate(&TestField::from(1u64)), TestField::from(5u64));
-    }
-
-    #[test]
-    fn test_multiply_polynomials() {
-        // P(x) = 1 + x
-        let p_coeffs = vec![TestField::from(1u64), TestField::from(1u64)];
-        let p = UnivariatePoly::new(p_coeffs);
-
-        // Q(x) = 1 + x
-        let q_coeffs = vec![TestField::from(1u64), TestField::from(1u64)];
-        let q = UnivariatePoly::new(q_coeffs);
-
-        // P(x) * Q(x) = (1 + x)^2 = 1 + 2x + x^2
-        let product = p.multiply(&q);
-        assert_eq!(product.degree(), 2);
-        assert_eq!(product.evaluate(&TestField::from(0u64)), TestField::from(1u64));
-        assert_eq!(product.evaluate(&TestField::from(1u64)), TestField::from(4u64));
-        assert_eq!(product.evaluate(&TestField::from(2u64)), TestField::from(9u64));
-    }
-
-    #[test]
-    fn test_scalar_multiply() {
-        // P(x) = 1 + 2x + 3x^2
-        let coeffs = vec![
-            TestField::from(1u64),
-            TestField::from(2u64),
-            TestField::from(3u64),
+    fn test_from_terms_with_duplicates() {
+        let terms = vec![
+            (1, Fr::from(2u32)),
+            (1, Fr::from(3u32)),
+            (0, Fr::from(1u32)),
         ];
-        let poly = UnivariatePoly::new(coeffs);
+        let poly = UnivariatePolynomial::from_terms(terms);
 
-        // 2 * P(x) = 2 + 4x + 6x^2
-        let scaled = poly.scalar_multiply(TestField::from(2u64));
-        assert_eq!(scaled.evaluate(&TestField::from(1u64)), TestField::from(12u64));
+        // Duplicates should be summed
+        assert_eq!(poly.num_terms(), 2);
+        assert_eq!(poly.get_coefficient(1), Fr::from(5u32));
     }
 
     #[test]
-    fn test_derivative() {
-        // P(x) = 1 + 2x + 3x^2
-        let coeffs = vec![
-            TestField::from(1u64),
-            TestField::from(2u64),
-            TestField::from(3u64),
-        ];
-        let poly = UnivariatePoly::new(coeffs);
+    fn test_polynomial_addition() {
+        // p1(x) = 2x^2 + 3x + 1
+        let mut p1 = UnivariatePolynomial::<Fr>::new();
+        p1.set_coefficient(2, Fr::from(2u32));
+        p1.set_coefficient(1, Fr::from(3u32));
+        p1.set_coefficient(0, Fr::from(1u32));
 
-        // P'(x) = 2 + 6x
-        let deriv = poly.derivative();
-        assert_eq!(deriv.evaluate(&TestField::from(0u64)), TestField::from(2u64));
-        assert_eq!(deriv.evaluate(&TestField::from(1u64)), TestField::from(8u64));
+        // p2(x) = x^2 + 2x + 3
+        let mut p2 = UnivariatePolynomial::<Fr>::new();
+        p2.set_coefficient(2, Fr::from(1u32));
+        p2.set_coefficient(1, Fr::from(2u32));
+        p2.set_coefficient(0, Fr::from(3u32));
+
+        // p1 + p2 = 3x^2 + 5x + 4
+        let result = p1 + p2;
+        assert_eq!(result.get_coefficient(2), Fr::from(3u32));
+        assert_eq!(result.get_coefficient(1), Fr::from(5u32));
+        assert_eq!(result.get_coefficient(0), Fr::from(4u32));
     }
 
     #[test]
-    fn test_evaluate_at_points() {
-        // P(x) = 1 + x
-        let coeffs = vec![TestField::from(1u64), TestField::from(1u64)];
-        let poly = UnivariatePoly::new(coeffs);
+    fn test_polynomial_subtraction() {
+        // p1(x) = 2x^2 + 3x + 1
+        let mut p1 = UnivariatePolynomial::<Fr>::new();
+        p1.set_coefficient(2, Fr::from(2u32));
+        p1.set_coefficient(1, Fr::from(3u32));
+        p1.set_coefficient(0, Fr::from(1u32));
 
+        // p2(x) = x^2 + 2x + 3
+        let mut p2 = UnivariatePolynomial::<Fr>::new();
+        p2.set_coefficient(2, Fr::from(1u32));
+        p2.set_coefficient(1, Fr::from(2u32));
+        p2.set_coefficient(0, Fr::from(3u32));
+
+        // p1 - p2 = x^2 + x - 2
+        let result = p1 - p2;
+        assert_eq!(result.get_coefficient(2), Fr::from(1u32));
+        assert_eq!(result.get_coefficient(1), Fr::from(1u32));
+        assert_eq!(result.get_coefficient(0), -Fr::from(2u32));
+    }
+
+    #[test]
+    fn test_polynomial_multiplication() {
+        // p1(x) = x + 1
+        let mut p1 = UnivariatePolynomial::<Fr>::new();
+        p1.set_coefficient(1, Fr::from(1u32));
+        p1.set_coefficient(0, Fr::from(1u32));
+
+        // p2(x) = x + 2
+        let mut p2 = UnivariatePolynomial::<Fr>::new();
+        p2.set_coefficient(1, Fr::from(1u32));
+        p2.set_coefficient(0, Fr::from(2u32));
+
+        // p1 * p2 = x^2 + 3x + 2
+        let result = p1 * p2;
+        assert_eq!(result.get_coefficient(2), Fr::from(1u32));
+        assert_eq!(result.get_coefficient(1), Fr::from(3u32));
+        assert_eq!(result.get_coefficient(0), Fr::from(2u32));
+    }
+
+    #[test]
+    fn test_polynomial_multiplication_by_zero() {
+        let mut p1 = UnivariatePolynomial::<Fr>::new();
+        p1.set_coefficient(2, Fr::from(2u32));
+        p1.set_coefficient(1, Fr::from(3u32));
+
+        let p2 = UnivariatePolynomial::<Fr>::new();
+
+        let result = p1 * p2;
+        assert!(result.is_zero());
+    }
+
+    #[test]
+    fn test_lagrange_interpolation_linear() {
+        // Two points: (0, 1) and (1, 2)
+        // Should give polynomial: y = x + 1
         let points = vec![
-            TestField::from(0u64),
-            TestField::from(1u64),
-            TestField::from(2u64),
+            (Fr::from(0u32), Fr::from(1u32)),
+            (Fr::from(1u32), Fr::from(2u32)),
         ];
-        let results = poly.evaluate_at_points(&points);
+        let poly = lagrange_interpolation(&points);
 
-        assert_eq!(results[0], TestField::from(1u64));
-        assert_eq!(results[1], TestField::from(2u64));
-        assert_eq!(results[2], TestField::from(3u64));
+        assert_eq!(poly.get_coefficient(1), Fr::from(1u32));
+        assert_eq!(poly.get_coefficient(0), Fr::from(1u32));
     }
 
     #[test]
-    fn test_leading_coefficient() {
-        let coeffs = vec![
-            TestField::from(1u64),
-            TestField::from(2u64),
-            TestField::from(3u64),
+    fn test_lagrange_interpolation_quadratic() {
+        // Three points: (0, 0), (1, 1), (2, 4)
+        // Should give polynomial: y = x^2
+        let points = vec![
+            (Fr::from(0u32), Fr::from(0u32)),
+            (Fr::from(1u32), Fr::from(1u32)),
+            (Fr::from(2u32), Fr::from(4u32)),
         ];
-        let poly = UnivariatePoly::new(coeffs);
+        let poly = lagrange_interpolation(&points);
 
-        assert_eq!(
-            poly.leading_coefficient(),
-            Some(TestField::from(3u64))
-        );
+        // Verify the polynomial passes through all points
+        assert_eq!(poly.evaluate_horner(Fr::from(0u32)), Fr::from(0u32));
+        assert_eq!(poly.evaluate_horner(Fr::from(1u32)), Fr::from(1u32));
+        assert_eq!(poly.evaluate_horner(Fr::from(2u32)), Fr::from(4u32));
+    }
+    #[test]
+    fn test_lagrange_interpolation_for_three_points() {
+        // three points [(0,8), (1,10), (2,16)]
+        //should give polynomial: y = 2xˆ2 + 8
+        let points = vec![
+            (Fr::from(0u32), Fr::from(8u32)),
+            (Fr::from(1u32), Fr::from(10u32)),
+            (Fr::from(2u32), Fr::from(16u32)),
+        ];
+        let poly = lagrange_interpolation(&points);
+        println!("the polynomial is {}", poly);
+        assert_eq!(poly.evaluate_horner(Fr::from(0u32)), Fr::from(8u32));
+        assert_eq!(poly.evaluate_horner(Fr::from(1u32)), Fr::from(10u32));
+        assert_eq!(poly.evaluate_horner(Fr::from(2u32)), Fr::from(16u32));
     }
 
     #[test]
-    fn test_compose_polynomials() {
-        // P(x) = 1 + x
-        let p_coeffs = vec![TestField::from(1u64), TestField::from(1u64)];
-        let p = UnivariatePoly::new(p_coeffs);
+    fn test_lagrange_interpolation_cubic() {
+        // Four points: (1, 1), (2, 8), (3, 27), (4, 64)
+        // Should give polynomial: y = x^3
+        let points = vec![
+            (Fr::from(1u32), Fr::from(1u32)),
+            (Fr::from(2u32), Fr::from(8u32)),
+            (Fr::from(3u32), Fr::from(27u32)),
+            (Fr::from(4u32), Fr::from(64u32)),
+        ];
+        let poly = lagrange_interpolation(&points);
 
-        // Q(x) = 2 + x
-        let q_coeffs = vec![TestField::from(2u64), TestField::from(1u64)];
-        let q = UnivariatePoly::new(q_coeffs);
-
-        // P(Q(x)) = 1 + (2 + x) = 3 + x
-        let composed = p.compose(&q);
-        assert_eq!(composed.evaluate(&TestField::from(0u64)), TestField::from(3u64));
-        assert_eq!(composed.evaluate(&TestField::from(1u64)), TestField::from(4u64));
+        // Verify the polynomial passes through all points
+        for (x, y) in points {
+            let result = poly.evaluate_horner(x);
+            assert_eq!(result, y, "Expected {}, got {}", y, result);
+        }
     }
 
     #[test]
-    fn test_shift_polynomial() {
-        // P(x) = 1 + x
-        let coeffs = vec![TestField::from(1u64), TestField::from(1u64)];
-        let poly = UnivariatePoly::new(coeffs);
+    fn test_evaluate_horner() {
+        // p(x) = 2x^2 + 3x + 1
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(2, Fr::from(2u32));
+        poly.set_coefficient(1, Fr::from(3u32));
+        poly.set_coefficient(0, Fr::from(1u32));
 
-        // P(x + 2) = 1 + (x + 2) = 3 + x
-        let shifted = poly.shift(TestField::from(2u64));
-        assert_eq!(shifted.evaluate(&TestField::from(0u64)), TestField::from(3u64));
-        assert_eq!(shifted.evaluate(&TestField::from(1u64)), TestField::from(4u64));
+        // p(2) = 2*4 + 3*2 + 1 = 8 + 6 + 1 = 15
+        assert_eq!(poly.evaluate_horner(Fr::from(2u32)), Fr::from(15u32));
+
+        // p(0) = 1
+        assert_eq!(poly.evaluate_horner(Fr::from(0u32)), Fr::from(1u32));
+
+        // p(-1) = 2*1 + 3*(-1) + 1 = 2 - 3 + 1 = 0
+        assert_eq!(poly.evaluate_horner(-Fr::from(1u32)), Fr::from(0u32));
     }
 
     #[test]
-    fn test_polynomial_operations_chain() {
-        // P(x) = 1 + x
-        let p_coeffs = vec![TestField::from(1u64), TestField::from(1u64)];
-        let p = UnivariatePoly::new(p_coeffs);
+    fn test_evaluate_direct() {
+        // p(x) = 2x^2 + 3x + 1
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(2, Fr::from(2u32));
+        poly.set_coefficient(1, Fr::from(3u32));
+        poly.set_coefficient(0, Fr::from(1u32));
 
-        // Q(x) = 2 + x
-        let q_coeffs = vec![TestField::from(2u64), TestField::from(1u64)];
-        let q = UnivariatePoly::new(q_coeffs);
+        // p(2) = 2*4 + 3*2 + 1 = 8 + 6 + 1 = 15
+        assert_eq!(poly.evaluate_direct(Fr::from(2u32)), Fr::from(15u32));
 
-        // (P + Q) * 2 = (3 + 2x) * 2 = 6 + 4x
-        let result = p.add(&q).scalar_multiply(TestField::from(2u64));
-        assert_eq!(result.evaluate(&TestField::from(0u64)), TestField::from(6u64));
-        assert_eq!(result.evaluate(&TestField::from(1u64)), TestField::from(10u64));
+        // p(0) = 1
+        assert_eq!(poly.evaluate_direct(Fr::from(0u32)), Fr::from(1u32));
+
+        // p(-1) = 2*1 + 3*(-1) + 1 = 2 - 3 + 1 = 0
+        assert_eq!(poly.evaluate_direct(-Fr::from(1u32)), Fr::from(0u32));
+    }
+
+    #[test]
+    fn test_horner_vs_direct_evaluation() {
+        // p(x) = 5x^3 + 2x^2 + 7x + 3
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(3, Fr::from(5u32));
+        poly.set_coefficient(2, Fr::from(2u32));
+        poly.set_coefficient(1, Fr::from(7u32));
+        poly.set_coefficient(0, Fr::from(3u32));
+
+        let x = Fr::from(3u32);
+        let horner_result = poly.evaluate_horner(x);
+        let direct_result = poly.evaluate_direct(x);
+
+        assert_eq!(horner_result, direct_result);
+    }
+
+    #[test]
+    fn test_sparse_representation() {
+        // Create a polynomial with only a few non-zero terms
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(100, Fr::from(1u32));
+        poly.set_coefficient(50, Fr::from(2u32));
+        poly.set_coefficient(0, Fr::from(3u32));
+
+        // Should only store 3 terms, not 101
+        assert_eq!(poly.num_terms(), 3);
+        assert_eq!(poly.degree(), 100);
+    }
+
+    #[test]
+    fn test_zero_coefficient_removal() {
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(2, Fr::from(5u32));
+        poly.set_coefficient(1, Fr::from(3u32));
+
+        // Setting a coefficient to zero should remove it
+        poly.set_coefficient(2, Fr::zero());
+        assert_eq!(poly.num_terms(), 1);
+        assert_eq!(poly.get_coefficient(2), Fr::zero());
+    }
+
+    #[test]
+    fn test_complex_polynomial_operations() {
+        // p1(x) = x^2 + 2x + 1 = (x + 1)^2
+        let mut p1 = UnivariatePolynomial::<Fr>::new();
+        p1.set_coefficient(2, Fr::from(1u32));
+        p1.set_coefficient(1, Fr::from(2u32));
+        p1.set_coefficient(0, Fr::from(1u32));
+
+        // p2(x) = x - 1
+        let mut p2 = UnivariatePolynomial::<Fr>::new();
+        p2.set_coefficient(1, Fr::from(1u32));
+        p2.set_coefficient(0, -Fr::from(1u32));
+
+        // p1 * p2 = (x + 1)^2 * (x - 1) = (x^2 + 2x + 1)(x - 1)
+        //         = x^3 + 2x^2 + x - x^2 - 2x - 1
+        //         = x^3 + x^2 - x - 1
+        let result = p1 * p2;
+
+        assert_eq!(result.get_coefficient(3), Fr::from(1u32));
+        assert_eq!(result.get_coefficient(2), Fr::from(1u32));
+        assert_eq!(result.get_coefficient(1), -Fr::from(1u32));
+        assert_eq!(result.get_coefficient(0), -Fr::from(1u32));
+    }
+
+    #[test]
+    fn test_complexity_analysis() {
+        // p(x) = x^100 + x^50 + x^10 + 1
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(100, Fr::from(1u32));
+        poly.set_coefficient(50, Fr::from(1u32));
+        poly.set_coefficient(10, Fr::from(1u32));
+        poly.set_coefficient(0, Fr::from(1u32));
+
+        // Horner method: 100 multiplications (degree)
+        assert_eq!(poly.horner_complexity(), 100);
+
+        // Direct method: 100 + 50 + 10 = 160 multiplications
+        assert_eq!(poly.direct_complexity(), 160);
+    }
+
+    #[test]
+    fn test_vec_based_sparse_efficiency() {
+        // Create a very sparse polynomial
+        let mut poly = UnivariatePolynomial::<Fr>::new();
+        poly.set_coefficient(1000000, Fr::from(1u32));
+        poly.set_coefficient(500000, Fr::from(2u32));
+        poly.set_coefficient(100, Fr::from(3u32));
+        poly.set_coefficient(0, Fr::from(5u32));
+
+        // Only 4 terms stored, not 1000001
+        assert_eq!(poly.num_terms(), 4);
+        assert_eq!(poly.degree(), 1000000);
+
+        // Horner evaluation is still efficient
+        let result = poly.evaluate_horner(Fr::from(2u32));
+        assert!(!result.is_zero());
+    }
+
+    #[test]
+    fn test_shamirs_secret_sharing() {
+        // Secret: 42 (constant term)
+        // Create polynomial: p(x) = 42 + 5x + 3x^2
+        let mut secret_poly = UnivariatePolynomial::<Fr>::new();
+        secret_poly.set_coefficient(0, Fr::from(42u32));
+        secret_poly.set_coefficient(1, Fr::from(5u32));
+        secret_poly.set_coefficient(2, Fr::from(3u32));
+
+        // Generate shares at points 1, 2, 3, 4, 5
+        let mut shares = Vec::new();
+        for i in 1..=5 {
+            let x = Fr::from(i as u32);
+            let y = secret_poly.evaluate_horner(x);
+            shares.push((x, y));
+        }
+
+        // Reconstruct with any 3 shares (threshold = 3)
+        let reconstruction_shares = vec![shares[0], shares[1], shares[2]];
+        let reconstructed_poly = lagrange_interpolation(&reconstruction_shares);
+
+        let reconstructed_secret = reconstructed_poly.get_coefficient(0);
+        assert_eq!(reconstructed_secret, Fr::from(42u32));
     }
 }

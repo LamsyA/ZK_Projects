@@ -1,9 +1,10 @@
 mod aes;
 mod diffle_hellman;
-pub mod merkle_tree;
-pub mod pedersen_commitment;
+mod merkle_tree;
+mod pedersen_commitment;
 mod rsa;
 pub mod univariate;
+
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
