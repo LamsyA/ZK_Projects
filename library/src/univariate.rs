@@ -409,10 +409,303 @@ pub fn lagrange_interpolation<F: Field>(points: &[(F, F)]) -> UnivariatePolynomi
     result
 }
 
+// ============================================================================
+// Boolean Hypercube for Multilinear Polynomial Evaluation (ZK-safe)
+// ============================================================================
+
+/// A Boolean Hypercube represents the domain {0, 1}^n for n variables.
+/// Used in multilinear polynomial evaluation and ZK proof systems.
+///
+/// **IMPORTANT FOR ZK**:
+/// - Represents all 2^n boolean assignments for n variables
+/// - Uses sparse representation: only stores non-zero evaluations
+/// - Each point is indexed by a bitmask (0 to 2^n - 1)
+/// - Efficient for sumcheck protocols and polynomial commitments
+/// - Integrates with multilinear polynomial evaluation
+///
+/// **Sparse Representation:**
+/// - Only stores non-zero evaluations as (index, value) pairs
+/// - Index corresponds to boolean assignment (bitmask)
+/// - Memory efficient: O(k) where k = number of non-zero evaluations
+/// - Ideal for sparse evaluation tables in ZK proofs
+///
+/// # Example
+/// For n=2, the hypercube contains 4 points:
+/// - Index 0 (0b00): (0, 0)
+/// - Index 1 (0b01): (1, 0)
+/// - Index 2 (0b10): (0, 1)
+/// - Index 3 (0b11): (1, 1)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BooleanHypercube<F: Field> {
+    /// Number of variables (dimension)
+    num_vars: usize,
+    /// Sparse representation: Vec of (index, value) tuples, sorted by index
+    /// Index is the bitmask representing the boolean assignment
+    /// Only non-zero evaluations are stored
+    evaluations: Vec<(u64, F)>,
+}
+
+impl<F: Field> BooleanHypercube<F> {
+    /// Creates a new empty Boolean hypercube for n variables.
+    /// No evaluations are stored initially (sparse representation).
+    ///
+    /// # Arguments
+    /// * `num_vars` - Number of variables (dimension of hypercube)
+    ///
+    /// # Returns
+    /// A BooleanHypercube with no evaluations
+    pub fn new(num_vars: usize) -> Self {
+        BooleanHypercube {
+            num_vars,
+            evaluations: Vec::new(),
+        }
+    }
+
+    /// Creates a Boolean hypercube from evaluations at all 2^n points.
+    ///
+    /// # Arguments
+    /// * `num_vars` - Number of variables
+    /// * `evaluations` - Vector of 2^num_vars evaluations
+    ///   - Index i corresponds to the boolean assignment represented by bitmask i
+    ///   - Only non-zero values are stored (sparse representation)
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Evaluations at {0,1}^2: f(0,0)=1, f(1,0)=0, f(0,1)=2, f(1,1)=0
+    /// let evals = vec![Fr::from(1u32), Fr::zero(), Fr::from(2u32), Fr::zero()];
+    /// let hypercube = BooleanHypercube::from_evaluations(2, evals);
+    /// // Stores only: [(0, 1), (2, 2)]
+    /// ```
+    pub fn from_evaluations(num_vars: usize, evaluations: Vec<F>) -> Self {
+        if evaluations.len() != (1 << num_vars) {
+            panic!("Number of evaluations must be 2^num_vars");
+        }
+
+        let mut sparse_evals = Vec::new();
+        for (index, value) in evaluations.iter().enumerate() {
+            if !value.is_zero() {
+                sparse_evals.push((index as u64, *value));
+            }
+        }
+
+        BooleanHypercube {
+            num_vars,
+            evaluations: sparse_evals,
+        }
+    }
+
+    /// Returns the number of variables (dimension).
+    pub fn num_vars(&self) -> usize {
+        self.num_vars
+    }
+
+    /// Returns the total number of points in the hypercube (2^num_vars).
+    pub fn num_points(&self) -> usize {
+        1 << self.num_vars
+    }
+
+    /// Returns the number of non-zero evaluations stored.
+    pub fn num_nonzero(&self) -> usize {
+        self.evaluations.len()
+    }
+
+    /// Sets the evaluation at a specific point.
+    ///
+    /// # Arguments
+    /// * `index` - Bitmask representing the boolean assignment (0 to 2^num_vars - 1)
+    /// * `value` - The evaluation value (zero removes the entry)
+    pub fn set_evaluation(&mut self, index: u64, value: F) {
+        if index >= (1u64 << self.num_vars) {
+            panic!("Index exceeds hypercube size");
+        }
+
+        // Find if index already exists
+        if let Some(pos) = self.evaluations.iter().position(|(i, _)| *i == index) {
+            if value.is_zero() {
+                self.evaluations.remove(pos);
+            } else {
+                self.evaluations[pos].1 = value;
+            }
+        } else if !value.is_zero() {
+            // Insert in sorted order
+            let pos = self
+                .evaluations
+                .binary_search_by_key(&index, |(i, _)| *i)
+                .unwrap_or_else(|e| e);
+            self.evaluations.insert(pos, (index, value));
+        }
+    }
+
+    /// Gets the evaluation at a specific point.
+    ///
+    /// # Arguments
+    /// * `index` - Bitmask representing the boolean assignment
+    ///
+    /// # Returns
+    /// The evaluation value, or F::zero() if not stored
+    pub fn get_evaluation(&self, index: u64) -> F {
+        self.evaluations
+            .binary_search_by_key(&index, |(i, _)| *i)
+            .ok()
+            .map(|idx| self.evaluations[idx].1)
+            .unwrap_or_else(F::zero)
+    }
+
+    /// Computes the sum of all evaluations in the hypercube.
+    /// Useful for sumcheck protocols.
+    ///
+    /// # Returns
+    /// The sum of all non-zero evaluations
+    pub fn sum(&self) -> F {
+        let mut sum = F::zero();
+        for (_, value) in &self.evaluations {
+            sum += value;
+        }
+        sum
+    }
+
+    /// Converts a boolean point to its index (bitmask).
+    ///
+    /// # Arguments
+    /// * `point` - Vector of field elements (0 or 1)
+    ///
+    /// # Returns
+    /// The bitmask index, or None if point contains non-boolean values
+    pub fn point_to_index(point: &[F]) -> Option<u64> {
+        let mut index = 0u64;
+        for (i, coord) in point.iter().enumerate() {
+            if *coord == F::one() {
+                index |= 1u64 << i;
+            } else if *coord != F::zero() {
+                return None; // Non-boolean coordinate
+            }
+        }
+        Some(index)
+    }
+
+    /// Converts an index (bitmask) to a boolean point.
+    ///
+    /// # Arguments
+    /// * `index` - Bitmask representing the boolean assignment
+    ///
+    /// # Returns
+    /// A vector of field elements (0 or 1)
+    pub fn index_to_point(index: u64, num_vars: usize) -> Vec<F> {
+        let mut point = Vec::with_capacity(num_vars);
+        for i in 0..num_vars {
+            let bit = ((index >> i) & 1) as u32;
+            point.push(if bit == 0 { F::zero() } else { F::one() });
+        }
+        point
+    }
+
+    /// Computes the Hamming weight (number of 1s) in an index.
+    ///
+    /// # Arguments
+    /// * `index` - Bitmask
+    ///
+    /// # Returns
+    /// The number of bits set to 1
+    pub fn hamming_weight(index: u64) -> usize {
+        index.count_ones() as usize
+    }
+
+    /// Returns all indices with a specific Hamming weight.
+    ///
+    /// # Arguments
+    /// * `weight` - The desired Hamming weight
+    ///
+    /// # Returns
+    /// A vector of indices with the specified weight
+    pub fn indices_with_weight(&self, weight: usize) -> Vec<u64> {
+        let mut indices = Vec::new();
+        for i in 0..self.num_points() {
+            if Self::hamming_weight(i as u64) == weight {
+                indices.push(i as u64);
+            }
+        }
+        indices
+    }
+
+    /// Computes the Hamming distance between two indices.
+    ///
+    /// # Arguments
+    /// * `index1` - First bitmask
+    /// * `index2` - Second bitmask
+    ///
+    /// # Returns
+    /// The number of bits where they differ
+    pub fn hamming_distance(index1: u64, index2: u64) -> usize {
+        (index1 ^ index2).count_ones() as usize
+    }
+
+    /// Returns an iterator over the non-zero evaluations.
+    pub fn iter(&self) -> impl Iterator<Item = (u64, &F)> {
+        self.evaluations.iter().map(|(i, v)| (*i, v))
+    }
+
+    /// Returns a reference to the internal evaluations vec.
+    pub fn evaluations(&self) -> &Vec<(u64, F)> {
+        &self.evaluations
+    }
+
+    /// Checks if the hypercube is empty (all evaluations are zero).
+    pub fn is_empty(&self) -> bool {
+        self.evaluations.is_empty()
+    }
+
+    /// Converts to a dense representation (all 2^n evaluations).
+    /// Warning: This can be memory-intensive for large n.
+    ///
+    /// # Returns
+    /// A vector of all 2^num_vars evaluations
+    pub fn to_dense(&self) -> Vec<F> {
+        let mut dense = vec![F::zero(); self.num_points()];
+        for (index, value) in &self.evaluations {
+            dense[*index as usize] = *value;
+        }
+        dense
+    }
+
+    /// Creates from a dense representation.
+    ///
+    /// # Arguments
+    /// * `num_vars` - Number of variables
+    /// * `dense` - Vector of all 2^num_vars evaluations
+    pub fn from_dense(num_vars: usize, dense: Vec<F>) -> Self {
+        Self::from_evaluations(num_vars, dense)
+    }
+}
+
+impl<F: Field + fmt::Display> fmt::Display for BooleanHypercube<F> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "BooleanHypercube with {} variables ({} non-zero of {} points):\n",
+            self.num_vars,
+            self.num_nonzero(),
+            self.num_points()
+        )?;
+        for (index, value) in &self.evaluations {
+            let point = Self::index_to_point(*index, self.num_vars);
+            write!(f, "  f(")?;
+            for (i, coord) in point.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{}", coord)?;
+            }
+            write!(f, ") = {}\n", value)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ark_bn254::Fr;
+    use ark_std::One;
     use ark_std::Zero;
 
     #[test]
@@ -571,6 +864,7 @@ mod tests {
         assert_eq!(poly.evaluate_horner(Fr::from(1u32)), Fr::from(1u32));
         assert_eq!(poly.evaluate_horner(Fr::from(2u32)), Fr::from(4u32));
     }
+
     #[test]
     fn test_lagrange_interpolation_for_three_points() {
         // three points [(0,8), (1,10), (2,16)]
@@ -638,8 +932,8 @@ mod tests {
         // p(0) = 1
         assert_eq!(poly.evaluate_direct(Fr::from(0u32)), Fr::from(1u32));
 
-        // p(-1) = 2*1 + 3*(-1) + 1 = 2 - 3 + 1 = 0
-        assert_eq!(poly.evaluate_direct(-Fr::from(1u32)), Fr::from(0u32));
+        // p(1) = 2*1 + 3*(1) + 1 = 2 + 3 + 1 = 6
+        assert_eq!(poly.evaluate_direct(Fr::from(1u32)), Fr::from(6u32));
     }
 
     #[test]
@@ -764,5 +1058,131 @@ mod tests {
 
         let reconstructed_secret = reconstructed_poly.get_coefficient(0);
         assert_eq!(reconstructed_secret, Fr::from(42u32));
+    }
+
+    // ========================================================================
+    // Boolean Hypercube Tests
+    // ========================================================================
+
+    #[test]
+    fn test_boolean_hypercube_creation() {
+        let hypercube = BooleanHypercube::<Fr>::new(2);
+        assert_eq!(hypercube.num_vars(), 2);
+        assert_eq!(hypercube.num_points(), 4);
+        assert!(hypercube.is_empty());
+    }
+
+    #[test]
+    fn test_boolean_hypercube_from_evaluations() {
+        let evals = vec![Fr::from(1u32), Fr::zero(), Fr::from(2u32), Fr::zero()];
+        let hypercube = BooleanHypercube::from_evaluations(2, evals);
+        assert_eq!(hypercube.num_vars(), 2);
+        assert_eq!(hypercube.num_nonzero(), 2);
+        assert_eq!(hypercube.get_evaluation(0), Fr::from(1u32));
+        assert_eq!(hypercube.get_evaluation(2), Fr::from(2u32));
+    }
+
+    #[test]
+    fn test_boolean_hypercube_set_get_evaluation() {
+        let mut hypercube = BooleanHypercube::<Fr>::new(2);
+        hypercube.set_evaluation(0, Fr::from(5u32));
+        hypercube.set_evaluation(3, Fr::from(7u32));
+
+        assert_eq!(hypercube.get_evaluation(0), Fr::from(5u32));
+        assert_eq!(hypercube.get_evaluation(3), Fr::from(7u32));
+        assert_eq!(hypercube.get_evaluation(1), Fr::zero());
+        assert_eq!(hypercube.num_nonzero(), 2);
+    }
+
+    #[test]
+    fn test_boolean_hypercube_sum() {
+        let evals = vec![
+            Fr::from(1u32),
+            Fr::from(2u32),
+            Fr::from(3u32),
+            Fr::from(4u32),
+        ];
+        let hypercube = BooleanHypercube::from_evaluations(2, evals);
+        assert_eq!(hypercube.sum(), Fr::from(10u32));
+    }
+
+    #[test]
+    fn test_boolean_hypercube_point_to_index() {
+        let point = vec![Fr::zero(), Fr::one()];
+        let index = BooleanHypercube::<Fr>::point_to_index(&point).unwrap();
+        assert_eq!(index, 2u64); // 0b10
+    }
+
+    #[test]
+    fn test_boolean_hypercube_index_to_point() {
+        let point = BooleanHypercube::<Fr>::index_to_point(3, 2);
+        assert_eq!(point[0], Fr::one());
+        assert_eq!(point[1], Fr::one());
+    }
+
+    #[test]
+    fn test_boolean_hypercube_hamming_weight() {
+        assert_eq!(BooleanHypercube::<Fr>::hamming_weight(0b101), 2);
+        assert_eq!(BooleanHypercube::<Fr>::hamming_weight(0b111), 3);
+        assert_eq!(BooleanHypercube::<Fr>::hamming_weight(0b000), 0);
+    }
+
+    #[test]
+    fn test_boolean_hypercube_hamming_distance() {
+        assert_eq!(BooleanHypercube::<Fr>::hamming_distance(0b101, 0b111), 1);
+        assert_eq!(BooleanHypercube::<Fr>::hamming_distance(0b000, 0b111), 3);
+    }
+
+    #[test]
+    fn test_boolean_hypercube_indices_with_weight() {
+        let hypercube = BooleanHypercube::<Fr>::new(3);
+        let weight_2 = hypercube.indices_with_weight(2);
+        assert_eq!(weight_2.len(), 3); // C(3,2) = 3
+    }
+
+    #[test]
+    fn test_boolean_hypercube_to_dense() {
+        let mut hypercube = BooleanHypercube::<Fr>::new(2);
+        hypercube.set_evaluation(0, Fr::from(1u32));
+        hypercube.set_evaluation(3, Fr::from(4u32));
+
+        let dense = hypercube.to_dense();
+        assert_eq!(dense.len(), 4);
+        assert_eq!(dense[0], Fr::from(1u32));
+        assert_eq!(dense[1], Fr::zero());
+        assert_eq!(dense[2], Fr::zero());
+        assert_eq!(dense[3], Fr::from(4u32));
+    }
+
+    #[test]
+    fn test_boolean_hypercube_from_dense() {
+        let dense = vec![Fr::from(1u32), Fr::zero(), Fr::from(2u32), Fr::zero()];
+        let hypercube = BooleanHypercube::from_dense(2, dense);
+        assert_eq!(hypercube.num_nonzero(), 2);
+        assert_eq!(hypercube.get_evaluation(0), Fr::from(1u32));
+        assert_eq!(hypercube.get_evaluation(2), Fr::from(2u32));
+    }
+
+    #[test]
+    fn test_boolean_hypercube_iterator() {
+        let mut hypercube = BooleanHypercube::<Fr>::new(2);
+        hypercube.set_evaluation(1, Fr::from(5u32));
+        hypercube.set_evaluation(3, Fr::from(7u32));
+
+        let count = hypercube.iter().count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_boolean_hypercube_sparse_efficiency() {
+        // Create a hypercube with many variables but few non-zero evaluations
+        let mut hypercube = BooleanHypercube::<Fr>::new(10);
+        hypercube.set_evaluation(0, Fr::from(1u32));
+        hypercube.set_evaluation(512, Fr::from(2u32));
+        hypercube.set_evaluation(1023, Fr::from(3u32));
+
+        assert_eq!(hypercube.num_vars(), 10);
+        assert_eq!(hypercube.num_points(), 1024);
+        assert_eq!(hypercube.num_nonzero(), 3);
     }
 }

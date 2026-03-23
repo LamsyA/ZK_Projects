@@ -1,5 +1,12 @@
     Blocking waiting for file lock on package cache
     Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on package cache
-    Blocking waiting for file lock on shared package cache
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.72s
+warning: failed to auto-clean cache data
+
+failed to clean entries from the global cache
+
+Caused by:
+  failed to remove file `/Users/mac/.cargo/registry/index/github.com-1ecc6299db9ec823/.cache/he/rm/hermit-abi`
+
+Caused by:
+  Permission denied (os error 13)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 54s

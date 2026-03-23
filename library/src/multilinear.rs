@@ -135,18 +135,24 @@ impl<F: Field> MultilinearPolynomial<F> {
     /// * `mask` - Bitmask indicating which variables are in the monomial
     /// * `coeff` - Coefficient value (zero removes the term)
     ///
+    /// # Returns
+    /// Result indicating success or error if bitmask exceeds number of variables
+    ///
     /// # Example
     /// ```ignore
     ///
     /// let mut poly = MultilinearPolynomial::<Fr>::new(2);
-    /// poly.set_coefficient(0, Fr::from(3u32));  // constant = 3
-    /// poly.set_coefficient(1, Fr::from(2u32));  // x0 coeff = 2
-    /// poly.set_coefficient(3, Fr::from(7u32));  // x0*x1 coeff = 7
+    /// poly.set_coefficient(0, Fr::from(3u32))?;  // constant = 3
+    /// poly.set_coefficient(1, Fr::from(2u32))?;  // x0 coeff = 2
+    /// poly.set_coefficient(3, Fr::from(7u32))?;  // x0*x1 coeff = 7
     /// // Now poly = 3 + 2*x0 + 7*x0*x1
     /// ```
-    pub fn set_coefficient(&mut self, mask: u64, coeff: F) {
+    pub fn set_coefficient(&mut self, mask: u64, coeff: F) -> Result<(), String> {
         if mask >= (1u64 << self.num_vars) {
-            panic!("Bitmask exceeds number of variables");
+            return Err(format!(
+                "Bitmask {} exceeds maximum for {} variables",
+                mask, self.num_vars
+            ));
         }
 
         // Find if mask already exists
@@ -164,6 +170,7 @@ impl<F: Field> MultilinearPolynomial<F> {
                 .unwrap_or_else(|e| e);
             self.terms.insert(pos, (mask, coeff));
         }
+        Ok(())
     }
 
     /// Gets the coefficient for a specific monomial.
@@ -250,9 +257,10 @@ impl<F: Field> MultilinearPolynomial<F> {
     /// // result = 3 + 2*1 + 5*1 + 7*1*1 = 17
     /// assert_eq!(result, Fr::from(17u32));
     /// ```
-    pub fn evaluate(&self, point: &[F]) -> F {
+    pub fn evaluate(&self, point: &[F]) -> Result<F, String> {
         if point.len() != self.num_vars {
-            panic!("Point dimension must match number of variables");
+            //
+            return Err(format!("Point dimension must match number of variables"));
         }
 
         // Use Boolean Hypercube method for evaluation
@@ -265,11 +273,11 @@ impl<F: Field> MultilinearPolynomial<F> {
 
         // After all variables are fixed, we have a 0-variable polynomial (constant)
         if current_poly.num_vars() == 0 && current_poly.num_terms() == 1 {
-            current_poly.get_coefficient(0)
+            Ok(current_poly.get_coefficient(0))
         } else if current_poly.num_vars() == 0 && current_poly.num_terms() == 0 {
-            F::zero()
+            Ok(F::zero())
         } else {
-            panic!("Unexpected state after evaluation");
+            Err(format!("Unexpected State"))
         }
     }
 
@@ -812,19 +820,19 @@ mod tests {
 
         // Evaluate at (0, 0)
         let point = vec![Fr::from(0u32), Fr::from(0u32)];
-        assert_eq!(poly.evaluate(&point), Fr::from(1u32));
+        assert_eq!(poly.evaluate(&point), Ok(Fr::from(1u32)));
 
         // Evaluate at (1, 0)
         let point = vec![Fr::from(1u32), Fr::from(0u32)];
-        assert_eq!(poly.evaluate(&point), Fr::from(3u32)); // 1 + 2
+        assert_eq!(poly.evaluate(&point), Ok(Fr::from(3u32))); // 1 + 2
 
         // Evaluate at (0, 1)
         let point = vec![Fr::from(0u32), Fr::from(1u32)];
-        assert_eq!(poly.evaluate(&point), Fr::from(4u32)); // 1 + 3
+        assert_eq!(poly.evaluate(&point), Ok(Fr::from(4u32))); // 1 + 3
 
         // Evaluate at (1, 1)
         let point = vec![Fr::from(1u32), Fr::from(1u32)];
-        assert_eq!(poly.evaluate(&point), Fr::from(10u32)); // 1 + 2 + 3 + 4
+        assert_eq!(poly.evaluate(&point), Ok(Fr::from(10u32))); // 1 + 2 + 3 + 4
     }
 
     #[test]
@@ -859,19 +867,19 @@ mod tests {
         // Verify by evaluating at all points
         assert_eq!(
             poly.evaluate(&vec![Fr::from(0u32), Fr::from(0u32)]),
-            Fr::from(1u32)
+            Ok(Fr::from(1u32))
         );
         assert_eq!(
             poly.evaluate(&vec![Fr::from(1u32), Fr::from(0u32)]),
-            Fr::from(3u32)
+            Ok(Fr::from(3u32))
         );
         assert_eq!(
             poly.evaluate(&vec![Fr::from(0u32), Fr::from(1u32)]),
-            Fr::from(4u32)
+            Ok(Fr::from(4u32))
         );
         assert_eq!(
             poly.evaluate(&vec![Fr::from(1u32), Fr::from(1u32)]),
-            Fr::from(10u32)
+            Ok(Fr::from(10u32))
         );
     }
 
@@ -930,11 +938,11 @@ mod tests {
 
         // Evaluate at (1, 1, 1)
         let point = vec![Fr::from(1u32), Fr::from(1u32), Fr::from(1u32)];
-        assert_eq!(poly.evaluate(&point), Fr::from(8u32));
+        assert_eq!(poly.evaluate(&point), Ok(Fr::from(8u32)));
 
         // Evaluate at (0, 0, 0)
         let point = vec![Fr::from(0u32), Fr::from(0u32), Fr::from(0u32)];
-        assert_eq!(poly.evaluate(&point), Fr::from(1u32));
+        assert_eq!(poly.evaluate(&point), Ok(Fr::from(1u32)));
     }
 
     // ========================================================================
@@ -955,7 +963,7 @@ mod tests {
         let result = poly.evaluate(&point);
 
         // Expected: 3 + 2*1 + 5*1 + 7*1*1 = 17
-        assert_eq!(result, Fr::from(17u32));
+        assert_eq!(result, Ok(Fr::from(17u32)));
     }
 
     #[test]
@@ -971,7 +979,7 @@ mod tests {
         let result = poly.evaluate(&point);
 
         // Expected: 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 = 8
-        assert_eq!(result, Fr::from(8u32));
+        assert_eq!(result, Ok(Fr::from(8u32)));
     }
 
     #[test]
@@ -988,7 +996,7 @@ mod tests {
         let result = poly.evaluate(&point);
 
         // Expected: 3 (only constant term)
-        assert_eq!(result, Fr::from(3u32));
+        assert_eq!(result, Ok(Fr::from(3u32)));
     }
 
     #[test]
@@ -1048,7 +1056,7 @@ mod tests {
         // Final result should match direct evaluation
         let direct = poly.evaluate(&challenge);
         let final_value = intermediates[2].get_coefficient(0);
-        assert_eq!(direct, final_value);
+        assert_eq!(direct, Ok(final_value));
     }
 
     #[test]
@@ -1063,7 +1071,7 @@ mod tests {
         let result = poly.evaluate(&point);
 
         // Expected: 5 + 3*2 = 11
-        assert_eq!(result, Fr::from(11u32));
+        assert_eq!(result, Ok(Fr::from(11u32)));
     }
 
     #[test]
@@ -1085,7 +1093,7 @@ mod tests {
         let result = poly.evaluate(&point);
 
         // Expected: 10 + 4*3 + 6*4*5 = 10 + 12 + 120 = 142
-        assert_eq!(result, Fr::from(142u32));
+        assert_eq!(result, Ok(Fr::from(142u32)));
     }
 
     #[test]
