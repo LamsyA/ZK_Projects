@@ -1,5 +1,5 @@
 use ark_ff::Field;
-
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::{Add, Mul, Sub};
 
@@ -229,14 +229,6 @@ impl<F: Field> MultilinearPolynomial<F> {
     /// This is the primary evaluation method. It iteratively fixes variables
     /// one at a time, reducing the polynomial dimension until reaching a scalar.
     ///
-    /// **Algorithm:**
-    /// 1. Start with the full polynomial
-    /// 2. For each variable i, fix it to point[i] using partial evaluation
-    /// 3. Continue until all variables are fixed
-    /// 4. Return the final scalar value
-    ///
-    /// **Complexity:** O(k * n) where k = number of terms, n = number of variables
-    ///
     /// # Arguments
     /// * `point` - Vector of field elements, one for each variable
     ///
@@ -325,55 +317,47 @@ impl<F: Field> MultilinearPolynomial<F> {
         }
 
         let var_mask = 1u64 << var_index;
-        let mut new_terms: Vec<(u64, F)> = Vec::new();
+        let lower_mask_bits = (1u64 << var_index) - 1; // Precompute mask for bits below var_index
+        let upper_mask_shift = var_index + 1; // Precompute shift amount
 
+        // Use HashMap for O(1) duplicate detection instead of linear search
+        let mut term_map: HashMap<u64, F> = HashMap::new();
+
+        // Single pass: evaluate, combine duplicates, and shift bitmasks
         for (mask, coeff) in self.iter() {
-            if (mask & var_mask) != 0 {
+            let new_coeff = if (mask & var_mask) != 0 {
                 // Variable is in this monomial, multiply by value
-                let new_mask = mask & !var_mask;
-                let new_coeff = *coeff * value;
-
-                // Find or insert the new_mask
-                if let Some(pos) = new_terms
-                    .iter()
-                    .position(|(m, _): &(u64, F)| *m == new_mask)
-                {
-                    new_terms[pos].1 += new_coeff;
-                    if new_terms[pos].1.is_zero() {
-                        new_terms.remove(pos);
-                    }
-                } else {
-                    new_terms.push((new_mask, new_coeff));
-                }
+                *coeff * value
             } else {
-                // Variable is not in this monomial, keep as is
-                if let Some(pos) = new_terms.iter().position(|(m, _): &(u64, F)| *m == mask) {
-                    new_terms[pos].1 += coeff;
-                    if new_terms[pos].1.is_zero() {
-                        new_terms.remove(pos);
-                    }
-                } else {
-                    new_terms.push((mask, *coeff));
-                }
-            }
+                // Variable is not in this monomial, keep coefficient as is
+                *coeff
+            };
+
+            // Shift bitmask: remove var_index bit and shift upper bits down
+            // This is done in one operation instead of two passes
+            let lower_bits = mask & lower_mask_bits;
+            let upper_bits = (mask >> upper_mask_shift) << var_index;
+            let shifted_mask = lower_bits | upper_bits;
+
+            // Combine with existing term or insert new one
+            term_map
+                .entry(shifted_mask)
+                .and_modify(|c| *c += new_coeff)
+                .or_insert(new_coeff);
         }
 
-        // Sort the new terms
-        new_terms.sort_by_key(|(m, _)| *m);
+        // Convert HashMap to sorted Vec, filtering out zero coefficients
+        let mut terms: Vec<(u64, F)> = term_map
+            .into_iter()
+            .filter(|(_, coeff)| !coeff.is_zero())
+            .collect();
 
-        // Shift bitmasks: move all bits after var_index down by 1
-        let mut shifted_terms: Vec<(u64, F)> = Vec::new();
-        for (mask, coeff) in new_terms {
-            // Split mask into lower and upper parts
-            let lower_mask = mask & ((1u64 << var_index) - 1); // bits below var_index
-            let upper_mask = (mask >> (var_index + 1)) << var_index; // bits above var_index, shifted down
-            let shifted_mask = lower_mask | upper_mask;
-            shifted_terms.push((shifted_mask, coeff));
-        }
+        // Sort by mask for consistent ordering
+        terms.sort_by_key(|(mask, _)| *mask);
 
         MultilinearPolynomial {
             num_vars: self.num_vars - 1,
-            terms: shifted_terms,
+            terms,
         }
     }
 

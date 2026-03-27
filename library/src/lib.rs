@@ -1,10 +1,12 @@
 mod aes;
 mod diffle_hellman;
 mod merkle_tree;
+pub mod multilinear;
 mod pedersen_commitment;
 mod rsa;
 pub mod univariate;
-pub mod multilinear;
+
+mod sumcheck;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
